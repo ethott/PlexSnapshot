@@ -1,15 +1,18 @@
 import re
+import requests
 from plexapi.server import PlexServer
 from flask import Flask, Response, redirect, url_for
 
 # ---- Plex setup ----
-baseurl = '*******'
-token = '*******'
+baseurl = '**********'
+token = '*********'
 plex = PlexServer(baseurl, token)
 
 # Library Information
+
 movies = plex.library.section('Movies')
 tv = plex.library.section('TV Shows')
+recentlyAdded = plex.library.recentlyAdded()
 
 allMovies = movies.all()
 allTVShows = tv.all()
@@ -32,6 +35,31 @@ def returnParsedTVTitles():
     parsed = [t.replace('-', ' ') for t in re.findall(r'<Show:\d+:([^>]+)>', str(allTVShows))]
     return parsed
 
+# Get poster with TMDB API
+def getPoster():
+
+    item = recentlyAdded[0]
+    title = getattr(item,"title",None)
+    url = "https://api.themoviedb.org/3/search/movie?query="+str(title)+"&include_adult=false&language=en-US&page=1"
+    headers = {
+        "accept": "application/json",
+        "Authorization": "Bearer ******************"
+    }
+
+    # tmdb pasrse to json
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    results = data.get("results",[])
+    
+    best = results[0]
+    poster_path = best.get("poster_path")
+    poster_url = "https://image.tmdb.org/t/p/original" + str(poster_path)
+
+    print(poster_url)
+
+    return poster_url
+
+
 # Media Statistics
 def totalMovies():
     countMovies = len(allMovies)
@@ -40,6 +68,8 @@ def totalMovies():
 def totalTVShows():
     countTVShows = len(allTVShows)
     return countTVShows
+
+# will track more in the future
 
 # ---- Flask app ----
 app = Flask(__name__)
@@ -56,6 +86,18 @@ def widget():
     movies       = returnParsedMovieTitles()[:20]
     shows        = returnParsedTVTitles()[:20]
 
+    poster_url = getPoster()                 
+    item       = recentlyAdded[0]            
+    title      = getattr(item, "title", "") or "Recently Added"
+
+    # poser fallback
+    poster_html = (
+        f"<img src='{poster_url}' alt='{title}' loading='lazy' "
+        "style='width:92px;height:138px;border-radius:10px;object-fit:cover;display:block'/>"
+        if poster_url else
+        "<div style='width:92px;height:138px;border-radius:10px;background:#222'></div>"
+    )
+
     html = (
         "<!doctype html><html><head>"
         "<meta charset='utf-8'/>"
@@ -65,29 +107,44 @@ def widget():
         "</head>"
         "<body style='font:13px system-ui;margin:6px;background:#0b0e12;color:#e7eef7;'>"
           "<div style='width:100%;max-width:420px'>"
-            "<div style='display:flex;justify-content:space-between;align-items:center;margin:0 0 6px'>"
-              "<strong>Plex Snapshot</strong>"
-              "<span style='font-size:11px;opacity:.7'>auto-refresh 5m</span>"
-            "</div>"
-            f"<div style='margin:0 0 10px'>Movies: <b>{movies_count}</b> &nbsp;•&nbsp; TV Shows: <b>{tv_count}</b></div>"
 
-            "<div style='background:rgba(255,255,255,.06);padding:10px;border-radius:10px;margin-bottom:10px;'>"
+            # header with poster + counts
+            "<div style='display:flex;gap:12px;align-items:center;margin:0 0 10px'>"
+              f"{poster_html}"
+              "<div style='flex:1'>"
+                "<div style='display:flex;justify-content:space-between;align-items:center'>"
+                  "<strong style='font-size:16px'>Plex Snapshot</strong>"
+                  "<span style='font-size:11px;opacity:.7'>auto-refresh 5m</span>"
+                "</div>"
+                f"<div style='margin-top:6px'>Movies: <b>{movies_count}</b> &nbsp;•&nbsp; "
+                f"TV Shows: <b>{tv_count}</b></div>"
+                f"<div style='margin-top:4px;opacity:.8;font-size:12px'>{title} - Most Recent Added</div>"
+              "</div>"
+            "</div>"
+
+            # movies card
+            "<div style='background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);"
+            "padding:10px;border-radius:10px;margin-bottom:10px;'>"
               "<div style='font-weight:600;margin:0 0 6px'>Movies (top 20)</div>"
               "<ul style='margin:0;padding-left:16px;max-height:150px;overflow:auto'>"
                 + "".join(f"<li>{t}</li>" for t in movies) +
               "</ul>"
             "</div>"
 
-            "<div style='background:rgba(255,255,255,.06);padding:10px;border-radius:10px;'>"
+            # shows card
+            "<div style='background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);"
+            "padding:10px;border-radius:10px;'>"
               "<div style='font-weight:600;margin:0 0 6px'>TV Shows (top 20)</div>"
               "<ul style='margin:0;padding-left:16px;max-height:150px;overflow:auto'>"
                 + "".join(f"<li>{t}</li>" for t in shows) +
               "</ul>"
             "</div>"
+
           "</div>"
         "</body></html>"
     )
     return Response(html, mimetype="text/html")
 
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=999)
+     app.run(host="0.0.0.0", port=999)
